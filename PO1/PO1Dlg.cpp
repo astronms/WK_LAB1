@@ -8,6 +8,10 @@
 #include "ParamsDlg.h"
 #include "afxdialogex.h"
 
+#include <vector>
+
+using namespace std;
+
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
@@ -23,10 +27,10 @@ class CAboutDlg : public CDialogEx
 public:
 	CAboutDlg();
 
-// Dialog Data
+	// Dialog Data
 	enum { IDD = IDD_ABOUTBOX };
 
-	protected:
+protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
 
 // Implementation
@@ -111,18 +115,21 @@ BOOL CPODlg::OnInitDialog()
 	SetIcon(m_hIcon, FALSE);		// Set small icon
 
 	// TODO: Add extra initialization here
-	CRect rDlg(7,7,407,407);
+	CRect rDlg(7, 7, 407, 407);
 	MapDialogRect(rDlg);
 
 	m_imgWndIN.Create(rDlg, this, IMG_WND_ID_IN);
-		
+
 	rDlg = CRect(530, 7, 930, 407);
 	MapDialogRect(rDlg);
 
 	m_imgWndOUT.Create(rDlg, this, IMG_WND_ID_OUT);
-	
+
 	// OPCJE
 	m_combo1.AddString(L"convert to greyscale");
+	m_combo1.AddString(L"histogram");
+	m_combo1.AddString(L"iterative binarization");
+	m_combo1.AddString(L"binarization with gradient");
 	m_combo1.SelectString(0, L"convert to greyscale");
 
 
@@ -152,7 +159,7 @@ void CPODlg::OnPaint()
 	if (IsIconic())
 	{
 		CPaintDC dc(this); // device context for painting
-		
+
 		SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
 
 		// Center icon in client rectangle
@@ -199,13 +206,13 @@ void CPODlg::OnBnClickedButtonLoad()
 		m_imgH = m_pImgIN->GetHeight();
 
 		m_pImgOUT = ::new Bitmap(m_imgW, m_imgH, PixelFormat32bppARGB);// PixelFormat16bppGrayScale);
-		
+
 		m_imgWndOUT.SetImg(m_pImgOUT);
-	
+
 		Invalidate();
 	}
 
-	
+
 }
 
 
@@ -226,38 +233,156 @@ void CPODlg::OnBnClickedButtonProcess()
 
 	}
 
+	if (sOption == L"histogram")
+	{
+		float pixelCount[256] = { 0 };
+		for (int x = 0; x < m_imgW; x++)
+			for (int y = 0; y < m_imgH; y++)
+			{
+				BYTE J = GetPixel(x, y);
+				pixelCount[J] = pixelCount[J] + 1;
+			}
+
+		float sk = 0;
+
+		for (int x = 0; x < m_imgW; x++)
+			for (int y = 0; y < m_imgH; y++)
+			{
+				BYTE J = GetPixel(x, y);
+				for (int i = 0; i < J; i++)
+				{
+					sk += pixelCount[i] / (m_imgH * m_imgW);
+				}
+				sk *= 255;
+				SetPixel(x, y, sk);
+				sk = 0;
+			}
+	}
+
+	if (sOption == L"binarization with gradient")
+	{
+		for (int x = 0; x < m_imgW; x++)
+			for (int y = 0; y < m_imgH; y++)
+			{
+				BYTE J = GetPixel(x, y);
+				SetPixel(x, y, J);
+			}
+
+		int G = 0;
+		unsigned long GJ = 0;
+
+		for (int y = 1; y < m_imgH; y++) {
+			for (int x = 1; x < m_imgW; x++) {
+
+				int gx = GetPixel(x + 1, y) - GetPixel(x - 1, y);
+				int gy = GetPixel(x, y + 1) - GetPixel(x, y - 1);
+
+				int g = max(abs(gx), abs(gy));
+
+				G += g;
+
+				GJ += g * GetPixel(x, y);
+			}
+		}
+
+		float binarization_t_gradient = (float)GJ / G;
+
+		for (int y = 0; y < m_imgH; y++) {
+			for (int x = 0; x < m_imgW; x++) {
+				BYTE J = GetPixel(x, y);
+
+				if (J <= binarization_t_gradient) {
+					J = 0;
+					SetPixel(x, y, J);
+				}
+				else {
+					J = 255;
+					SetPixel(x, y, J);
+				}
+			}
+		}
+	}
+
+	if (sOption == L"iterative binarization")
+	{
+		float pixelCount[256] = { 0 };
+		for (int x = 0; x < m_imgW; x++)
+			for (int y = 0; y < m_imgH; y++)
+			{
+				BYTE J = GetPixel(x, y);
+				pixelCount[J] = pixelCount[J] + 1;
+			}
+		int t = 256 / 2;
+		int t_old = t;
+
+		do {
+			t_old = t;
+			float miBelow = 0;
+			float miAbove = 0;
+			float p0 = 0;
+			float p1 = 0;
+			for (int i = 0; i < t; i++)
+			{
+				p0 += pixelCount[i] / (m_imgH * m_imgW) * 255;
+			}
+			for (int i = 0; i < t; i++)
+			{
+				miBelow += pixelCount[i] * i * 255 / (m_imgH * m_imgW) / p0;
+			}
+
+			for (int i = 255; i > t; i--)
+			{
+				p1 += pixelCount[i] / (m_imgH * m_imgW) * 255;
+			}
+			for (int i = 255; i > t; i--)
+			{
+				miAbove += pixelCount[i] * i * 255 / (m_imgH * m_imgW) / p1;
+			}
+			t = (miBelow + miAbove) / 2;
+		} while (abs(t_old - t) >= 2);
+
+		for (int x = 0; x < m_imgW; x++)
+			for (int y = 0; y < m_imgH; y++)
+			{
+				BYTE J = GetPixel(x, y);
+				J = (J > t) ? 255 : 0;
+				SetPixel(x, y, J);
+			}
+	}
+
+
 	/*********************************************************************************************************************************
 	TU NALE¯Y WSTAWIC OBS£UGÊ POZOSTA£YCH OPCJI
-	
+
 	Zmienne m_imgH i m_imgW zawieraj¹ informacje o wysokoœci i szerokoœci przetwarzanego obrazu.
 
-	Funkcja GetPixel(x,y) zwraca wartoœæ jasnoœci piksela o wspó³rzêdnych (x,y) w obrazie Ÿród³owym (w przypadku obrazów RGB nastêpuje 
+	Funkcja GetPixel(x,y) zwraca wartoœæ jasnoœci piksela o wspó³rzêdnych (x,y) w obrazie Ÿród³owym (w przypadku obrazów RGB nastêpuje
 	automatyczna konwersja na poziom szaroœci).
-	
-	Funkcja SetPixel(x,y,J) ustawia w obrazie wynikowym jasnoœæ piksela o wspó³rzêdnych (x,y) na wartoœæ J. 
+
+	Funkcja SetPixel(x,y,J) ustawia w obrazie wynikowym jasnoœæ piksela o wspó³rzêdnych (x,y) na wartoœæ J.
 
 	Wartoœci jasnoœci s¹ typu BYTE (0..255).
-	
-	Dodawanie opcji do listy rozwijanej zrealizowane jest na koñcu kodu metody OnInitDialog(). 
-	
+
+	Dodawanie opcji do listy rozwijanej zrealizowane jest na koñcu kodu metody OnInitDialog().
+
 	W metodzie OnBnClickedButtonParams() pobierany jest ³añcuch znaków wpisany przez u¿ytkownika w oknie pojawiaj¹cym siê po naciœniêciu
 	przycisku "Params".
-		
+
 	***********************************************************************************************************************************
 	TO DO: ADD THE IMPLEMENTATION OF OTHER IMAGE PROCESSING OPERATIONS HERE
 
 	Variables m_imgH and m_imgW store the information about the height and the width of the image which should be processed.
 
-	GetPixel(x,y) returns the intensity of the pixel located at (x,y) position within the source image (in the case of RGB images the 
+	GetPixel(x,y) returns the intensity of the pixel located at (x,y) position within the source image (in the case of RGB images the
 	conversion to grey level value is performed automatically).
 
 	SetPixel(x,y,J) sets the intensity of the pixel located at (x,y) position within the output image to J.
 	The intensity values are of type BYTE (0..255).
 
-	New options can be added to the drop-down list by using m_combo1.AddString() method (see the last lines of OnInitDialog() implementation). 
-	
-	OnBnClickedButtonParams() retrieves the string of parameters entered in the window that appears after clicking the "Params" button.  
-	
+	New options can be added to the drop-down list by using m_combo1.AddString() method (see the last lines of OnInitDialog() implementation).
+
+	OnBnClickedButtonParams() retrieves the string of parameters entered in the window that appears after clicking the "Params" button.
+
 	***********************************************************************************************************************************/
 
 	Invalidate();
@@ -288,16 +413,16 @@ void CPODlg::OnBnClickedButtonSave()
 			default:
 				sExt = "BMP";
 			}
-			
+
 			sPath += L"." + sExt;
 		}
-		
+
 		if (sExt == "BMP")
 			sClsId = "image/bmp";
 
 		if (sExt == "JPG")
 			sClsId = "image/jpeg";
-				
+
 		GetEncoderClsid(sClsId, &Clsid);
 		m_pImgOUT->Save(sPath, &Clsid, NULL);
 	}
@@ -308,7 +433,7 @@ void CPODlg::OnBnClickedButtonParams()
 {
 	CParamsDlg paramsDlg;
 	CString s;
-	
+
 	if (paramsDlg.DoModal() == IDOK)
 	{
 		s = paramsDlg.m_sParams;
@@ -337,14 +462,14 @@ BYTE CPODlg::GetPixel(int x, int y)
 	double r = pixelColor.GetR();
 	double g = pixelColor.GetG();
 	double b = pixelColor.GetB();
-	double J = 0.299*r + 0.587*g + 0.114*b;
+	double J = 0.299 * r + 0.587 * g + 0.114 * b;
 
 	return (BYTE)J;
 }
 
 void CPODlg::SetPixel(int x, int y, BYTE J)
 {
-	Color pixelColor(J,J,J);
+	Color pixelColor(J, J, J);
 	Status s = m_pImgOUT->SetPixel(x, y, pixelColor);
 }
 
